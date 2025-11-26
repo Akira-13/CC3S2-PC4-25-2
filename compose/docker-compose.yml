@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+  web:
+    build:
+      context: ../app
+      dockerfile: Dockerfile
+    container_name: secure-logs-web
+    env_file:
+      - .env
+    networks:
+      - frontend
+      - backend
+    environment:
+      - RAW_LOG_DIR=${RAW_LOG_DIR}
+    volumes:
+      - raw_logs:${RAW_LOG_DIR}
+    ports:
+      - "8000:8000"
+    mem_limit: 256m
+    cpus: "0.50"
+    restart: unless-stopped
+
+  log-processor:
+    build:
+      context: ../log-processor
+      dockerfile: Dockerfile
+    container_name: secure-logs-processor
+    env_file:
+      - .env
+    networks:
+      - backend
+    volumes:
+      - raw_logs:/var/log/app/raw
+      - sanitized_logs:/var/log/app/sanitized
+    depends_on:
+      - web
+    mem_limit: 256m
+    cpus: "0.50"
+    restart: "no"
+
+  backup:
+    build:
+      context: ../backup
+      dockerfile: Dockerfile
+    container_name: secure-logs-backup
+    env_file:
+      - .env
+    networks:
+      - backend
+    volumes:
+      - sanitized_logs:/var/log/app/sanitized
+      - ../backups:/backups
+    depends_on:
+      - log-processor
+    mem_limit: 256m
+    cpus: "0.50"
+    
+    restart: "no"
+
+networks:
+  frontend:
+  backend:
+
+volumes:
+  raw_logs:
+  sanitized_logs:
+
