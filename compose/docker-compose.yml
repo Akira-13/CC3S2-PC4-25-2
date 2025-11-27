@@ -49,6 +49,10 @@ services:
       - .env
     networks:
       - backend
+    environment:
+      - SANITIZED_LOG_DIR=${SANITIZED_LOG_DIR}
+      - BACKUP_OUTPUT_DIR=${BACKUP_OUTPUT_DIR}
+      - BACKUP_ENCRYPTION=${BACKUP_ENCRYPTION}
     volumes:
       - sanitized_logs:/var/log/app/sanitized
       - ../backups:/backups
@@ -56,8 +60,8 @@ services:
       - log-processor
     mem_limit: 256m
     cpus: "0.50"
-    
     restart: "no"
+
 
 networks:
   frontend:
