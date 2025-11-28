@@ -13,6 +13,7 @@ import datetime
 import logging
 import os
 import tarfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -106,6 +107,9 @@ def main() -> None:
     logging.info("Iniciando proceso de backup.")
     ensure_directories()
     files = find_files_to_backup()
+
+    # Medición de tiempo: justo antes de iniciar el empaquetado
+    start_time = time.time()
     tar_path = create_tar_gz(files)
 
     if tar_path is None:
@@ -113,6 +117,17 @@ def main() -> None:
         return
 
     enc_path = encrypt_backup(tar_path)
+    # Medición de tiempo: justo después de finalizar el cifrado
+    end_time = time.time()
+    duration_seconds = end_time - start_time
+
+    # Log de métricas estructuradas (clave=valor) para fácil ingesta
+    logging.info(
+        "metrics backup_duration_seconds=%.3f start_time=%.6f end_time=%.6f",
+        duration_seconds,
+        start_time,
+        end_time,
+    )
     logging.info("Backup completado con éxito: %s", enc_path)
 
 
