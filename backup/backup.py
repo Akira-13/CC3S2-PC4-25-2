@@ -46,6 +46,30 @@ def find_files_to_backup() -> list[Path]:
     return files
 
 
+def get_dir_size_bytes(path: Path) -> int:
+    """Calcula el tamaño total (en bytes) de todos los archivos dentro de un directorio.
+
+    - Si el directorio no existe, retorna 0 y registra un warning.
+    - Ignora subdirectorios vacíos.
+    """
+    try:
+        if not path.exists():
+            logging.warning("Directorio no existe para cálculo de tamaño: %s", path)
+            return 0
+
+        total = 0
+        for p in path.rglob("*"):
+            if p.is_file():
+                try:
+                    total += p.stat().st_size
+                except Exception as e:
+                    logging.warning("No se pudo obtener tamaño de %s: %s", p, e)
+        return total
+    except Exception as e:
+        logging.error("Error calculando tamaño de %s: %s", path, e)
+        return 0
+
+
 def create_tar_gz(files: list[Path]) -> Optional[Path]:
     """Crea un archivo .tar.gz con los archivos de entrada."""
     if not files:
@@ -110,6 +134,11 @@ def main() -> None:
 
     # Medición de tiempo: justo antes de iniciar el empaquetado
     start_time = time.time()
+
+    # Métrica de tamaño antes: suma de los archivos anonimizados
+    size_before_bytes = get_dir_size_bytes(SANITIZED_LOG_DIR)
+    logging.info("metrics size_before_bytes=%d", size_before_bytes)
+
     tar_path = create_tar_gz(files)
 
     if tar_path is None:
@@ -127,6 +156,18 @@ def main() -> None:
         duration_seconds,
         start_time,
         end_time,
+    )
+
+    # Métrica de tamaño después: tamaño del archivo cifrado final
+    try:
+        size_after_bytes = enc_path.stat().st_size
+    except Exception as e:
+        logging.error("No se pudo obtener tamaño de backup cifrado %s: %s", enc_path, e)
+        size_after_bytes = 0
+    logging.info(
+        "metrics size_after_bytes=%d size_before_bytes=%d",
+        size_after_bytes,
+        size_before_bytes,
     )
     logging.info("Backup completado con éxito: %s", enc_path)
 
