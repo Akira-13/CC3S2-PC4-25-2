@@ -1,81 +1,154 @@
 #!/usr/bin/env python3
-"""
-Log processor 
-"""
 
 import os
-from pathlib import Path
-import logging
 import re
+import hashlib
+from datetime import datetime
+from typing import Dict, Pattern
 
-# Directorios configurables vía variables de entorno (pero con defaults)
-RAW_LOG_DIR = Path(os.getenv("RAW_LOG_DIR", "/var/log/app/raw"))
-SANITIZED_LOG_DIR = Path(os.getenv("SANITIZED_LOG_DIR", "/var/log/app/sanitized"))
-
-RAW_LOG_FILE = RAW_LOG_DIR / "app.log"
-SANITIZED_LOG_FILE = SANITIZED_LOG_DIR / "app.log"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [log-processor] %(message)s",
+# Directorios configurables vía variables de entorno
+RAW_LOGS_DIR = os.getenv("RAW_LOGS_DIR", "/data/raw_logs")
+SANITIZED_LOGS_DIR = os.getenv("SANITIZED_LOGS_DIR", "/data/sanitized_logs")
+ERROR_LOG_PATH = os.getenv(
+    "ERROR_LOG_PATH",
+    os.path.join(SANITIZED_LOGS_DIR, "processor_errors.log"),
 )
 
+# Expresiones regulares para detectar datos sensibles
+PATTERNS: Dict[str, Pattern[str]] = {
+    # Correos electrónicos
+    "email": re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
+    # DNI con 8 dígitos (ej: 12345678)
+    "dni": re.compile(r"\b\d{8}\b"),
+    # Celular peruano típico: 9 + 8 dígitos (ej: 9XXXXXXXX)
+    "phone": re.compile(r"\b9\d{8}\b"),
+    # Dirección IP v4 simple
+    "ip": re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"),
+}
 
-def ensure_directories() -> None:
-    """Asegura que los directorios existan."""
-    if not RAW_LOG_DIR.exists():
-        logging.error("El directorio de logs crudos no existe: %s", RAW_LOG_DIR)
-        raise SystemExit(1)
 
-    SANITIZED_LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def simple_anonymize_line(line: str) -> str:
+def hash_value(value: str) -> str:
     """
-    Aplica una anonimización simple a la línea.
-
+    Genera un hash SHA-256 truncado para anonimizar un valor
+    de forma determinística (misma entrada -> misma salida).
     """
-    # Reemplazar email=..., name=..., token=..., customer_id=..., ip=... por ***
-    patterns = ["email", "name", "token", "customer_id", "ip"]
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    # Truncamos para que sea más legible en los logs
+    return digest[:12]
+
+
+def anonymize_line(line: str) -> str:
+    """
+    Aplica anonimización a una línea de log, reemplazando
+    valores sensibles por un marcador del tipo <tipo:hash>.
+
+    Usamos pattern.sub para evitar reemplazos incorrectos
+    (por ejemplo, que el DNI se reemplace dentro del teléfono).
+    """
     sanitized = line
 
-    for field in patterns:
-        # Coincide con field=ALGO 
-        sanitized = re.sub(rf"({field}=)(\S+)", rf"\1***", sanitized)
+    for label, pattern in PATTERNS.items():
+        def _replacer(match):
+            original = match.group(0)
+            masked = f"<{label}:{hash_value(original)}>"
+            return masked
+
+        sanitized = pattern.sub(_replacer, sanitized)
 
     return sanitized
 
 
-def process_logs() -> None:
-    """Lee el log crudo y genera el log anonimizado."""
-    if not RAW_LOG_FILE.exists():
-        logging.warning("No se encontró el archivo de log crudo: %s", RAW_LOG_FILE)
-        logging.warning("Nada que procesar en este momento.")
+
+def ensure_output_dirs():
+    """
+    Crea los directorios de salida si no existen.
+    No lanza excepción si ya existen.
+    """
+    os.makedirs(SANITIZED_LOGS_DIR, exist_ok=True)
+
+
+def log_error(message: str):
+    """
+    Registra un mensaje de error con timestamp en el archivo de errores.
+    Nunca debe lanzar excepción (manejo defensivo).
+    """
+    try:
+        os.makedirs(os.path.dirname(ERROR_LOG_PATH), exist_ok=True)
+        timestamp = datetime.now().isoformat()
+        with open(ERROR_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] {message}\n")
+    except Exception:
+        # Si fallara el log de errores, no hacemos nada más
+        # para no romper el procesamiento principal.
+        pass
+
+
+def process_file(input_path: str, output_path: str):
+    """
+    Procesa un archivo de logs:
+    - Lee todas las líneas.
+    - Anonimiza cada línea.
+    - Escribe el resultado en el archivo de salida.
+    """
+    try:
+        with open(input_path, "r", encoding="utf-8") as infile:
+            lines = infile.readlines()
+    except FileNotFoundError:
+        log_error(f"Archivo no encontrado: {input_path}")
+        return
+    except PermissionError:
+        log_error(f"Permiso denegado al leer: {input_path}")
+        return
+    except Exception as e:
+        log_error(f"Error leyendo {input_path}: {e}")
         return
 
-    logging.info("Procesando log crudo: %s", RAW_LOG_FILE)
+    sanitized_lines = []
 
-    with RAW_LOG_FILE.open("r", encoding="utf-8") as src, \
-            SANITIZED_LOG_FILE.open("w", encoding="utf-8") as dst:
-        count = 0
-        for line in src:
-            sanitized_line = simple_anonymize_line(line)
-            dst.write(sanitized_line)
-            count += 1
+    for idx, line in enumerate(lines):
+        try:
+            sanitized = anonymize_line(line)
+            sanitized_lines.append(sanitized)
+        except Exception as e:
+            # Si una línea falla, se registra y se continúa
+            log_error(f"Error procesando línea {idx} en {input_path}: {e}")
 
-    logging.info(
-        "Procesamiento completado. %d líneas procesadas. Archivo anonimizad"
-        "o: %s",
-        count,
-        SANITIZED_LOG_FILE,
-    )
+    try:
+        with open(output_path, "w", encoding="utf-8") as outfile:
+            outfile.writelines(sanitized_lines)
+    except PermissionError:
+        log_error(f"Permiso denegado al escribir: {output_path}")
+    except Exception as e:
+        log_error(f"Error escribiendo {output_path}: {e}")
 
 
-def main() -> None:
-    logging.info("Iniciando log-processor.")
-    ensure_directories()
-    process_logs()
-    logging.info("Finalizado log-processor.")
+def process_all_files():
+    """
+    Recorre el directorio de logs crudos y procesa cada archivo regular.
+    """
+    if not os.path.isdir(RAW_LOGS_DIR):
+        log_error(f"Directorio de entrada no existe: {RAW_LOGS_DIR}")
+        return
+
+    ensure_output_dirs()
+
+    for filename in os.listdir(RAW_LOGS_DIR):
+        input_path = os.path.join(RAW_LOGS_DIR, filename)
+
+        # Solo procesamos archivos regulares
+        if not os.path.isfile(input_path):
+            continue
+
+        output_path = os.path.join(SANITIZED_LOGS_DIR, filename)
+        process_file(input_path, output_path)
+
+
+def main():
+    """
+    Punto de entrada del script.
+    Pensado para ejecutarse dentro del contenedor de log-processor.
+    """
+    process_all_files()
 
 
 if __name__ == "__main__":
