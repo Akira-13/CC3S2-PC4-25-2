@@ -127,7 +127,18 @@ def encrypt_backup(tar_path: Path) -> Path:
     return encrypt_base64(tar_path)
 
 
-def main() -> None:
+def main() -> Optional[dict]:
+    """Ejecuta el flujo completo de backup y retorna métricas.
+
+    Retorna un diccionario con:
+        - timestamp
+        - backup_file
+        - duration_seconds
+        - size_before_bytes
+        - size_after_bytes
+
+    Si no hay archivos para respaldar, retorna None.
+    """
     logging.info("Iniciando proceso de backup.")
     ensure_directories()
     files = find_files_to_backup()
@@ -143,7 +154,7 @@ def main() -> None:
 
     if tar_path is None:
         logging.info("No se generó backup (no había archivos para empaquetar).")
-        return
+        return None
 
     enc_path = encrypt_backup(tar_path)
     # Medición de tiempo: justo después de finalizar el cifrado
@@ -170,6 +181,24 @@ def main() -> None:
         size_before_bytes,
     )
     logging.info("Backup completado con éxito: %s", enc_path)
+
+    metrics = {
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "backup_file": enc_path.name,
+        "duration_seconds": round(duration_seconds, 3),
+        "size_before_bytes": size_before_bytes,
+        "size_after_bytes": size_after_bytes,
+    }
+
+    logging.info(
+        "metrics summary backup_file=%s duration_seconds=%.3f size_before_bytes=%d size_after_bytes=%d",
+        metrics["backup_file"],
+        metrics["duration_seconds"],
+        metrics["size_before_bytes"],
+        metrics["size_after_bytes"],
+    )
+
+    return metrics
 
 
 if __name__ == "__main__":
