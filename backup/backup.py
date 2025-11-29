@@ -13,6 +13,7 @@ import datetime
 import logging
 import os
 import tarfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -43,6 +44,30 @@ def find_files_to_backup() -> list[Path]:
     else:
         logging.info("Se encontraron %d archivos para respaldar.", len(files))
     return files
+
+
+def get_dir_size_bytes(path: Path) -> int:
+    """Calcula el tamaño total (en bytes) de todos los archivos dentro de un directorio.
+
+    - Si el directorio no existe, retorna 0 y registra un warning.
+    - Ignora subdirectorios vacíos.
+    """
+    try:
+        if not path.exists():
+            logging.warning("Directorio no existe para cálculo de tamaño: %s", path)
+            return 0
+
+        total = 0
+        for p in path.rglob("*"):
+            if p.is_file():
+                try:
+                    total += p.stat().st_size
+                except Exception as e:
+                    logging.warning("No se pudo obtener tamaño de %s: %s", p, e)
+        return total
+    except Exception as e:
+        logging.error("Error calculando tamaño de %s: %s", path, e)
+        return 0
 
 
 def create_tar_gz(files: list[Path]) -> Optional[Path]:
@@ -102,18 +127,78 @@ def encrypt_backup(tar_path: Path) -> Path:
     return encrypt_base64(tar_path)
 
 
-def main() -> None:
+def main() -> Optional[dict]:
+    """Ejecuta el flujo completo de backup y retorna métricas.
+
+    Retorna un diccionario con:
+        - timestamp
+        - backup_file
+        - duration_seconds
+        - size_before_bytes
+        - size_after_bytes
+
+    Si no hay archivos para respaldar, retorna None.
+    """
     logging.info("Iniciando proceso de backup.")
     ensure_directories()
     files = find_files_to_backup()
+
+    # Medición de tiempo: justo antes de iniciar el empaquetado
+    start_time = time.time()
+
+    # Métrica de tamaño antes: suma de los archivos anonimizados
+    size_before_bytes = get_dir_size_bytes(SANITIZED_LOG_DIR)
+    logging.info("metrics size_before_bytes=%d", size_before_bytes)
+
     tar_path = create_tar_gz(files)
 
     if tar_path is None:
         logging.info("No se generó backup (no había archivos para empaquetar).")
-        return
+        return None
 
     enc_path = encrypt_backup(tar_path)
+    # Medición de tiempo: justo después de finalizar el cifrado
+    end_time = time.time()
+    duration_seconds = end_time - start_time
+
+    # Log de métricas estructuradas (clave=valor) para fácil ingesta
+    logging.info(
+        "metrics backup_duration_seconds=%.3f start_time=%.6f end_time=%.6f",
+        duration_seconds,
+        start_time,
+        end_time,
+    )
+
+    # Métrica de tamaño después: tamaño del archivo cifrado final
+    try:
+        size_after_bytes = enc_path.stat().st_size
+    except Exception as e:
+        logging.error("No se pudo obtener tamaño de backup cifrado %s: %s", enc_path, e)
+        size_after_bytes = 0
+    logging.info(
+        "metrics size_after_bytes=%d size_before_bytes=%d",
+        size_after_bytes,
+        size_before_bytes,
+    )
     logging.info("Backup completado con éxito: %s", enc_path)
+
+    metrics = {
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "backup_file": enc_path.name,
+        "duration_seconds": round(duration_seconds, 3),
+        "size_before_bytes": size_before_bytes,
+        "size_after_bytes": size_after_bytes,
+    }
+
+    logging.info(
+        "metrics summary backup_file=%s duration_seconds=%.3f size_before_bytes=%d size_after_bytes=%d",
+        metrics["backup_file"],
+        metrics["duration_seconds"],
+        metrics["size_before_bytes"],
+        metrics["size_after_bytes"],
+    )
+
+    return metrics
 
 
 if __name__ == "__main__":
