@@ -7,8 +7,8 @@ from datetime import datetime
 from typing import Dict, Pattern
 
 # Directorios configurables vía variables de entorno
-RAW_LOGS_DIR = os.getenv("RAW_LOGS_DIR", "/data/raw_logs")
-SANITIZED_LOGS_DIR = os.getenv("SANITIZED_LOGS_DIR", "/data/sanitized_logs")
+RAW_LOG_DIR = Path(os.getenv("RAW_LOG_DIR", "/var/log/app/raw"))
+SANITIZED_LOG_DIR = Path(os.getenv("SANITIZED_LOG_DIR", "/var/log/app/sanitized"))
 ERROR_LOG_PATH = os.getenv(
     "ERROR_LOG_PATH",
     os.path.join(SANITIZED_LOGS_DIR, "processor_errors.log"),

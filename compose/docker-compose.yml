@@ -31,6 +31,10 @@ services:
       - .env
     networks:
       - backend
+    environment:
+      - RAW_LOGS_DIR=/var/log/app/raw
+      - SANITIZED_LOGS_DIR=/var/log/app/sanitized
+      - ERROR_LOG_PATH=/var/log/app/sanitized/processor_errors.log
     volumes:
       - raw_logs:/var/log/app/raw
       - sanitized_logs:/var/log/app/sanitized
@@ -39,6 +43,8 @@ services:
     mem_limit: 256m
     cpus: "0.50"
     restart: "no"
+
+
 
   backup:
     build:
