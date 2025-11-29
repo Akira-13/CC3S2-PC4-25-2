@@ -14,12 +14,19 @@ import logging
 import os
 import tarfile
 import time
+import csv
 from pathlib import Path
 from typing import Optional
 
 SANITIZED_LOG_DIR = Path(os.getenv("SANITIZED_LOG_DIR", "/var/log/app/sanitized"))
 BACKUP_OUTPUT_DIR = Path(os.getenv("BACKUP_OUTPUT_DIR", "/backups"))
-BACKUP_ENCRYPTION = os.getenv("BACKUP_ENCRYPTION", "base64").lower()
+BACKUP_ENCRYPTION = os.getenv("BACKUP_ENCRYPTION", "base64")
+
+# Ruta por defecto del archivo de métricas
+METRICS_FILE_PATH = Path(
+    os.getenv("BACKUP_METRICS_PATH", str(BACKUP_OUTPUT_DIR / "metrics.csv"))
+)
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -126,6 +133,28 @@ def encrypt_backup(tar_path: Path) -> Path:
     )
     return encrypt_base64(tar_path)
 
+def append_metrics_csv(record: dict, path: Path = METRICS_FILE_PATH) -> None:
+    """
+    Agrega un registro de métricas a un archivo CSV.
+
+    - Crea el directorio si no existe.
+    - Si el archivo no existe, escribe la cabecera.
+    - Cada ejecución de backup agrega una nueva fila.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    file_exists = path.exists()
+    fieldnames = list(record.keys())
+
+    logging.info("Escribiendo métricas de backup en: %s", path)
+
+    with path.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(record)
+
+
 
 def main() -> Optional[dict]:
     """Ejecuta el flujo completo de backup y retorna métricas.
@@ -197,6 +226,14 @@ def main() -> Optional[dict]:
         metrics["size_before_bytes"],
         metrics["size_after_bytes"],
     )
+
+    try:
+        append_metrics_csv(metrics)
+        logging.info("Métricas de backup guardadas en %s", METRICS_FILE_PATH)
+    except Exception as e:
+        logging.error(
+            "No se pudieron escribir las métricas en %s: %s", METRICS_FILE_PATH, e
+        )
 
     return metrics
 

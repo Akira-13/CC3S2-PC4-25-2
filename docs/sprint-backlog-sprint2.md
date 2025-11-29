@@ -1,4 +1,4 @@
-# Sprint Backlog — Integrante A
+# Sprint Backlog
 
 **Proyecto:** Secure Logs & Backup Stack
 **Sprint:** 2
@@ -122,3 +122,73 @@ La función `main()` ahora retorna el diccionario de métricas para permitir:
 **Entregables:**
 
 * Implementación del retorno en `backup/main()` ()
+
+
+# Sprint Backlog — Sandro Carrillo
+
+**Proyecto:** Secure Logs & Backup Stack  
+**Sprint:** 2  
+**Rol:** Métricas de backups, persistencia y tooling de soporte
+
+## **6. Persistencia de métricas de backup en CSV**
+
+**Descripción:**  
+Implementar la persistencia de las métricas generadas por `backup/main()` en un archivo CSV alojado en el host, de forma que cada ejecución de backup deje un registro histórico. El archivo se encuentra en el directorio de backups y puede ser consumido por herramientas externas (Excel, pandas, etc.).
+
+Las métricas se almacenan en:
+
+- `backups/metrics.csv` (ruta por defecto),
+- usando las mismas claves del diccionario retornado por `main()`:
+  - `timestamp`
+  - `backup_file`
+  - `duration_seconds`
+  - `size_before_bytes`
+  - `size_after_bytes`
+
+**Criterios de aceptación cumplidos:**
+
+* Se crea el archivo `backups/metrics.csv` si no existe.
+* La primera vez que se escribe, se incluye una cabecera con los nombres de las columnas.
+* Cada ejecución exitosa de backup agrega una nueva fila con las métricas correspondientes.
+* El archivo `backups/metrics.csv` es visible en el host (no solo dentro del contenedor).
+* El flujo no se rompe si la escritura de métricas falla; el error se registra en logs y el backup sigue su curso.
+
+**Entregables:**
+
+* Función `append_metrics_csv(record: dict, path: Path = METRICS_FILE_PATH)` en `backup/backup.py`.
+* Llamada a `append_metrics_csv(metrics)` dentro de `main()` después de construir el diccionario de métricas.
+* Archivo de ejemplo `backups/metrics.csv` generado durante las pruebas.
+
+---
+
+## **7. Comandos de Makefile para backups y visualización de métricas**
+
+**Descripción:**  
+Exponer comandos simples en el `Makefile` de la raíz del proyecto para que cualquier integrante del equipo pueda:
+
+* ejecutar el proceso de backup de forma estándar, y
+* revisar rápidamente las métricas registradas.
+
+Se agregan los targets:
+
+* `make backup` → ejecuta el script `backup/run-backup.sh`.
+* `make show-metrics` → muestra el contenido de `backups/metrics.csv` (si existe).
+
+**Criterios de aceptación cumplidos:**
+
+* `make backup` ejecuta el contenedor de backup y genera:
+  * un nuevo archivo `.enc` en `backups/`,
+  * y una nueva fila en `backups/metrics.csv`.
+* `make show-metrics`:
+  * imprime el contenido de `backups/metrics.csv` si el archivo existe,
+  * imprime un mensaje amigable si aún no hay métricas.
+* Los comandos funcionan desde la raíz del proyecto, sin necesidad de navegar a subdirectorios.
+
+**Entregables:**
+
+* `Makefile` actualizado con los targets `backup` y `show-metrics`.
+* Evidencia de ejecución (logs o capturas) mostrando:
+  * creación de backups,
+  * actualización de `backups/metrics.csv`,
+  * salida de `make show-metrics`.
+
